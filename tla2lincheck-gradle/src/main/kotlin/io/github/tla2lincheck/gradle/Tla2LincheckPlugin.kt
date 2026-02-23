@@ -153,6 +153,7 @@ abstract class GenerateLincheckTestsTask : DefaultTask() {
 
         val tlaFiles = sourceDir.walkTopDown()
             .filter { it.extension == "tla" }
+            .filter { !it.nameWithoutExtension.contains("_TTrace_") }
             .toList()
 
         if (tlaFiles.isEmpty()) {
