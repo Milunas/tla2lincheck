@@ -1,0 +1,36 @@
+# Gradle
+.gradle/
+build/
+dist/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+
+# Java/Kotlin
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+
+# Local properties
+local.properties
+gradle.properties.local
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Linux
+.directory

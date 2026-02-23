@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+<meta http-equiv="x-ua-compatible" content="IE=edge"/>
+<title>Test results - LincheckGeneratorTest</title>
+<link href="../css/base-style.css" rel="stylesheet" type="text/css"/>
+<link href="../css/style.css" rel="stylesheet" type="text/css"/>
+<script src="../js/report.js" type="text/javascript"></script>
+</head>
+<body>
+<div id="content">
+<h1>LincheckGeneratorTest</h1>
+<div class="breadcrumbs">
+<a href="../index.html">all</a> &gt; 
+<a href="../packages/io.github.tla2lincheck.generator.html">io.github.tla2lincheck.generator</a> &gt; LincheckGeneratorTest</div>
+<div id="summary">
+<table>
+<tr>
+<td>
+<div class="summaryGroup">
+<table>
+<tr>
+<td>
+<div class="infoBox" id="tests">
+<div class="counter">24</div>
+<p>tests</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="failures">
+<div class="counter">0</div>
+<p>failures</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="ignored">
+<div class="counter">0</div>
+<p>ignored</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="duration">
+<div class="counter">0.076s</div>
+<p>duration</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+</td>
+<td>
+<div class="infoBox success" id="successRate">
+<div class="percent">100%</div>
+<p>successful</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+<div id="tabs">
+<ul class="tabLinks">
+<li>
+<a href="#tab0">Tests</a>
+</li>
+<li>
+<a href="#tab1">Standard output</a>
+</li>
+</ul>
+<div id="tab0" class="tab">
+<h2>Tests</h2>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Method name</th>
+<th>Duration</th>
+<th>Result</th>
+</tr>
+</thead>
+<tr>
+<td class="success">Class name follows convention: {SpecName}LincheckTest</td>
+<td class="success">classNameConvention()</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">Config controls thread count and iterations</td>
+<td class="success">configControlsParams()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">Generated code contains Lincheck imports</td>
+<td class="success">containsImports()</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">Generated code contains package declaration</td>
+<td class="success">containsPackage()</td>
+<td class="success">0.047s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">End-to-end: parse Counter spec and generate valid test</td>
+<td class="success">endToEnd()</td>
+<td class="success">0.014s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">Generates constants as vals</td>
+<td class="success">generatesConstants()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">Generates fields for state variables</td>
+<td class="success">generatesFields()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">Generates checkInvariants() method</td>
+<td class="success">generatesInvariantChecker()</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">Generates lockObj for synchronization</td>
+<td class="success">generatesLockObj()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">Generates ModelCheckingOptions test</td>
+<td class="success">generatesModelChecking()</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">Generates @Operation methods for each action</td>
+<td class="success">generatesOperations()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">Generates @Param annotations for parameterized actions</td>
+<td class="success">generatesParamAnnotations()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">Generates StressOptions test</td>
+<td class="success">generatesStress()</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">checkInvariants() is called inside @Operation methods</td>
+<td class="success">invariantCheckCalledInOperations()</td>
+<td class="success">0.005s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">Invariant checking can be disabled via config</td>
+<td class="success">invariantCheckDisabled()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">Invariant checker contains all invariant names</td>
+<td class="success">invariantCheckerContainsNames()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">Invariant checker uses Kotlin check() calls</td>
+<td class="success">invariantCheckerUsesCheck()</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">Operations contain branch conditions</td>
+<td class="success">operationsContainConditions()</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">Operations contain state mutations</td>
+<td class="success">operationsContainMutations()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">Operations use synchronized(lockObj)</td>
+<td class="success">operationsSynchronized()</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">predicateToKotlin translates comparisons correctly</td>
+<td class="success">predicateToKotlinComparison()</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">predicateToKotlin returns null for Custom without kotlinExpr</td>
+<td class="success">predicateToKotlinCustom()</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">predicateToKotlin translates logical connectives</td>
+<td class="success">predicateToKotlinLogical()</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">predicateToKotlin translates membership</td>
+<td class="success">predicateToKotlinMembership()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+</table>
+</div>
+<div id="tab1" class="tab">
+<h2>Standard output</h2>
+<span class="code">
+<pre>Generated class: E2ECounterLincheckTest
+Generated code:
+package io.github.tla2lincheck.generated
+
+import org.jetbrains.kotlinx.lincheck.*
+import org.jetbrains.kotlinx.lincheck.annotations.*
+import org.jetbrains.kotlinx.lincheck.paramgen.*
+import org.jetbrains.kotlinx.lincheck.strategy.managed.modelchecking.*
+import org.jetbrains.kotlinx.lincheck.strategy.stress.*
+import org.junit.jupiter.api.Test
+
+
+/**
+ * AUTO-GENERATED Lincheck test from TLA+ specification: E2ECounter
+ *
+ * Source: TlaFile(filePath=, moduleName=E2ECounter)
+ *
+ * This test verifies that an implementation of the E2ECounter protocol
+ * is linearizable with respect to the TLA+ specification's sequential semantics
+ * AND that all 1 safety invariant(s) hold under every
+ * explored interleaving.
+ *
+ * Invariants checked:
+ *   - NonNegative: count &gt;= 0
+ *
+ * Liveness properties (NOT checked — require TLC model checking):
+ *   - Spec: Init /\ [][Next]_count
+ *
+ * Generated by tla2lincheck v0.1.0
+ */
+
+
+class E2ECounterLincheckTest {
+
+    // ── State fields (from TLA+ VARIABLES) ─────────────────────────
+
+    private var count: Int = 0
+
+    // ── Constants (from TLA+ CONSTANTS) ────────────────────────────
+    private val MaxValue = 5
+
+    // ── Synchronization ────────────────────────────────────────────
+    private val lockObj = Any()
+
+
+    // ── Invariant verification (from TLA+ safety invariants) ───────
+
+    /**
+     * Checks all TLA+ safety invariants after each operation.
+     *
+     * If any invariant is violated under ANY interleaving explored by
+     * Lincheck's model checker, the test fails with the exact trace.
+     */
+    private fun checkInvariants() {
+        // TLA+ invariant: NonNegative
+        check(count &gt;= 0) {
+            &quot;Invariant 'NonNegative' violated&quot;
+        }
+    }
+
+
+    // ── Operations (from TLA+ actions) ─────────────────────────────
+
+    /**
+     * TLA+ action: Increment
+     * - Increment: TLA+ action: Increment
+     */
+    @Operation
+    fun increment(): String = synchronized(lockObj) {
+        if (count &lt; MaxValue) {
+            count += 1
+            checkInvariants()
+            return &quot;ok&quot;
+    }
+
+
+    /**
+     * TLA+ action: Decrement
+     * - Decrement: TLA+ action: Decrement
+     */
+    @Operation
+    fun decrement(): String = synchronized(lockObj) {
+        if (count &gt; 0) {
+            count -= 1
+            checkInvariants()
+            return &quot;ok&quot;
+    }
+
+
+
+    // ── Lincheck test methods ──────────────────────────────────────
+
+    /**
+     * MODEL CHECKING MODE: Exhaustively explores ALL possible thread
+     * interleavings.  If any interleaving produces a non-linearizable
+     * result or violates an invariant, Lincheck reports the exact trace.
+     */
+    @Test
+    fun modelCheckingTest() = ModelCheckingOptions()
+        .threads(3)
+        .actorsPerThread(2)
+        .invocationsPerIteration(1000)
+        .iterations(50)
+        .checkObstructionFreedom(false)
+        .actorsBefore(0)
+        .actorsAfter(0)
+        .check(this::class)
+
+    /**
+     * STRESS TEST MODE: Runs under real concurrent load.
+     * Catches JVM-specific issues that model checking may miss.
+     */
+    @Test
+    fun stressTest() = StressOptions()
+        .threads(3)
+        .actorsPerThread(2)
+        .invocationsPerIteration(100)
+        .iterations(25)
+        .actorsBefore(0)
+        .actorsAfter(0)
+        .check(this::class)
+
+
+}
+
+</pre>
+</span>
+</div>
+</div>
+<div id="footer">
+<p>
+<div>
+<label class="hidden" id="label-for-line-wrapping-toggle" for="line-wrapping-toggle">Wrap lines
+<input id="line-wrapping-toggle" type="checkbox" autocomplete="off"/>
+</label>
+</div>Generated by 
+<a href="http://www.gradle.org">Gradle 8.10</a> at Feb 23, 2026, 5:26:39 PM</p>
+</div>
+</div>
+</body>
+</html>

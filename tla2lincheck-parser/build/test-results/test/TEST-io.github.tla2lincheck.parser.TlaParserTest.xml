@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.github.tla2lincheck.parser.TlaParserTest" tests="20" skipped="0" failures="0" errors="0" timestamp="2026-02-23T16:26:39" hostname="polpc14839" time="0.098">
+  <properties/>
+  <testcase name="Extracts module name from ---- MODULE Name ----" classname="io.github.tla2lincheck.parser.TlaParserTest" time="0.046"/>
+  <testcase name="Extracts CONSTANTS section" classname="io.github.tla2lincheck.parser.TlaParserTest" time="0.008"/>
+  <testcase name="Extracts VARIABLES section" classname="io.github.tla2lincheck.parser.TlaParserTest" time="0.005"/>
+  <testcase name="Infers variable types from TypeOK" classname="io.github.tla2lincheck.parser.TlaParserTest" time="0.002"/>
+  <testcase name="Extracts Init assignments" classname="io.github.tla2lincheck.parser.TlaParserTest" time="0.003"/>
+  <testcase name="Extracts actions from Next relation" classname="io.github.tla2lincheck.parser.TlaParserTest" time="0.005"/>
+  <testcase name="Parses Increment effects correctly" classname="io.github.tla2lincheck.parser.TlaParserTest" time="0.005"/>
+  <testcase name="Parses Decrement effects correctly" classname="io.github.tla2lincheck.parser.TlaParserTest" time="0.002"/>
+  <testcase name="Parses UNCHANGED in Read action" classname="io.github.tla2lincheck.parser.TlaParserTest" time="0.001"/>
+  <testcase name="Extracts named invariants" classname="io.github.tla2lincheck.parser.TlaParserTest" time="0.002"/>
+  <testcase name="Invariant predicates are parsed as Comparison expressions" classname="io.github.tla2lincheck.parser.TlaParserTest" time="0.001"/>
+  <testcase name="Extracts parameter domains from \E quantifiers in Next" classname="io.github.tla2lincheck.parser.TlaParserTest" time="0.001"/>
+  <testcase name="Parameterized actions are not marked as system actions" classname="io.github.tla2lincheck.parser.TlaParserTest" time="0.001"/>
+  <testcase name="Set effects are classified correctly" classname="io.github.tla2lincheck.parser.TlaParserTest" time="0.002"/>
+  <testcase name="ParseResult reports success for valid spec" classname="io.github.tla2lincheck.parser.TlaParserTest" time="0.001"/>
+  <testcase name="ParseResult reports error for missing module name" classname="io.github.tla2lincheck.parser.TlaParserTest" time="0.002"/>
+  <testcase name="inferType handles standard TLA+ type expressions" classname="io.github.tla2lincheck.parser.TlaParserTest" time="0.0"/>
+  <testcase name="classifyEffect handles common TLA+ patterns" classname="io.github.tla2lincheck.parser.TlaParserTest" time="0.001"/>
+  <testcase name="classifyEffect handles EXCEPT expressions" classname="io.github.tla2lincheck.parser.TlaParserTest" time="0.0"/>
+  <testcase name="Parses function-typed variables and EXCEPT effects" classname="io.github.tla2lincheck.parser.TlaParserTest" time="0.001"/>
+  <system-out><![CDATA[  Actions: [Increment, Decrement, Read]
+  Increment effects: [count: Increment(amount=1), history: SeqAppend(element="inc")]
+  Invariants: [NonNegative, BoundedAbove]
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
