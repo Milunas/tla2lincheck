@@ -137,6 +137,7 @@ enum class VariableType(
     SET_OF_INT("SUBSET Int", "MutableSet<Int>", "mutableSetOf()"),
     SEQUENCE("Seq(...)", "MutableList<Any>", "mutableListOf()"),
     FUNCTION_INT_TO_INT("[... -> Int]", "MutableMap<Int, Int>", "mutableMapOf()"),
+    FUNCTION_INT_TO_STRING("[... -> String]", "MutableMap<Int, String>", "mutableMapOf()"),
     FUNCTION_INT_TO_SET("[... -> SUBSET ...]", "MutableMap<Int, MutableSet<Int>>", "mutableMapOf()"),
     ENUM("{ ... }", "String", "\"\""),
     CUSTOM("custom", "Any", "null")

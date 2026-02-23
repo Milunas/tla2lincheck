@@ -74,8 +74,8 @@ class TlaParser {
         }
 
         val typeOK = extractTypeOK(tlaContent)
-        val typedVariables = enrichVariablesWithTypes(variables, typeOK)
         val initPredicate = extractInit(tlaContent, warnings)
+        val typedVariables = enrichVariablesWithTypes(variables, typeOK, initPredicate)
         val actions = extractActions(tlaContent, warnings)
         val actionNames = actions.map { it.name }.toSet()
         val invariants = extractInvariants(tlaContent, actionNames)
@@ -251,44 +251,114 @@ class TlaParser {
         val mapping = mutableMapOf<String, String>()
 
         // Pattern: varName \in TypeExpr
-        val pattern = Regex("""(\w+)\s*\\in\s+(.+)""")
+        val inPattern = Regex("""(\w+)\s*\\in\s+(.+)""")
+        // Pattern: varName \subseteq SetExpr (means var is a subset of that set)
+        val subsetPattern = Regex("""(\w+)\s*\\subseteq\s+(.+)""")
+
         for (line in block.lines()) {
-            val match = pattern.find(line.trim().removePrefix("/\\").trim()) ?: continue
-            mapping[match.groupValues[1]] = match.groupValues[2].trim()
+            val cleaned = line.trim().removePrefix("/\\").trim()
+            if (cleaned.isEmpty()) continue
+
+            subsetPattern.find(cleaned)?.let { match ->
+                // \subseteq means this is a SET variable
+                mapping[match.groupValues[1]] = "SUBSET ${match.groupValues[2].trim()}"
+            } ?: inPattern.find(cleaned)?.let { match ->
+                mapping[match.groupValues[1]] = match.groupValues[2].trim()
+            }
         }
         return mapping
     }
 
     private fun enrichVariablesWithTypes(
         variables: List<StateVariable>,
-        typeOK: Map<String, String>
+        typeOK: Map<String, String>,
+        init: InitPredicate? = null
     ): List<StateVariable> {
         return variables.map { v ->
-            val typeExpr = typeOK[v.name] ?: return@map v
-            v.copy(type = inferType(typeExpr))
+            val typeExpr = typeOK[v.name]
+            if (typeExpr != null) {
+                return@map v.copy(type = inferType(typeExpr))
+            }
+            // Fallback: infer type from Init expression
+            if (init != null) {
+                val initAssign = init.assignments.find { it.variable == v.name }
+                if (initAssign != null) {
+                    val inferredType = inferTypeFromInit(initAssign.tlaExpression)
+                    if (inferredType != VariableType.CUSTOM) {
+                        return@map v.copy(type = inferredType)
+                    }
+                }
+            }
+            v
         }
+    }
+
+    /**
+     * Infers [VariableType] from a TLA+ Init assignment expression.
+     *
+     * Examples:
+     *   `<<>>`                            → SEQUENCE
+     *   `{}`                              → SET_OF_INT
+     *   `0`                               → INTEGER
+     *   `Actors`                          → SET_OF_INT (uppercase, looks like a set constant)
+     *   `[c \in Clients |-> {}]`          → FUNCTION_INT_TO_SET
+     */
+    private fun inferTypeFromInit(expr: String): VariableType = when {
+        expr == "<<>>" -> VariableType.SEQUENCE
+        expr == "{}" -> VariableType.SET_OF_INT
+        expr.matches(Regex("""\d+""")) -> VariableType.INTEGER
+        expr == "TRUE" || expr == "FALSE" -> VariableType.BOOLEAN
+        expr.startsWith("\"") -> VariableType.ENUM
+        // [x \in Set |-> {}] → FUNCTION_INT_TO_SET
+        expr.contains("|->") && expr.contains("{}") -> VariableType.FUNCTION_INT_TO_SET
+        // [x \in Set |-> <<>>] → FUNCTION_INT_TO_INT (map to sequence, but close enough)
+        expr.contains("|->") && expr.contains("<<>>") -> VariableType.FUNCTION_INT_TO_INT
+        // [x \in Set |-> "string"] → FUNCTION_INT_TO_STRING
+        expr.contains("|->") && expr.contains("\"") -> VariableType.FUNCTION_INT_TO_STRING
+        // [x \in Set |-> 0] → FUNCTION_INT_TO_INT
+        expr.contains("|->") -> VariableType.FUNCTION_INT_TO_INT
+        // Uppercase word looks like a constant set → SET_OF_INT
+        expr.matches(Regex("""\w+""")) && expr[0].isUpperCase() -> VariableType.SET_OF_INT
+        else -> VariableType.CUSTOM
     }
 
     /**
      * Infers [VariableType] from a TLA+ type expression (from TypeOK).
      *
      * Examples:
-     *   `0..MaxValue`              → INTEGER
-     *   `BOOLEAN`                  → BOOLEAN
-     *   `SUBSET Users`             → SET_OF_INT
-     *   `Seq(Records)`             → SEQUENCE
-     *   `[Books -> 0..N]`          → FUNCTION_INT_TO_INT
-     *   `[Books -> SUBSET Users]`  → FUNCTION_INT_TO_SET
-     *   `{"idle", "active"}`       → ENUM
+     *   `0..MaxValue`                     → INTEGER
+     *   `BOOLEAN`                         → BOOLEAN
+     *   `SUBSET Users`                    → SET_OF_INT
+     *   `Seq(Records)`                    → SEQUENCE
+     *   `[Books -> 0..N]`                 → FUNCTION_INT_TO_INT
+     *   `[Books -> SUBSET Users]`         → FUNCTION_INT_TO_SET
+     *   `[Actors -> States]`              → FUNCTION_INT_TO_STRING (if States is an enum)
+     *   `[Actors -> {"a","b"}]`           → FUNCTION_INT_TO_STRING
+     *   `{"idle", "active"}`              → ENUM
+     *   `Nat`                             → INTEGER
      */
     internal fun inferType(typeExpr: String): VariableType = when {
         typeExpr == "BOOLEAN" -> VariableType.BOOLEAN
+        typeExpr == "Nat" -> VariableType.INTEGER
         typeExpr.startsWith("Seq(") -> VariableType.SEQUENCE
+        // [Domain -> SUBSET Range] — function to set
         typeExpr.contains("->") && typeExpr.contains("SUBSET") -> VariableType.FUNCTION_INT_TO_SET
-        typeExpr.contains("->") -> VariableType.FUNCTION_INT_TO_INT
+        // [Domain -> {string literals}] — function to string enum
+        typeExpr.contains("->") && typeExpr.contains("\"") -> VariableType.FUNCTION_INT_TO_STRING
+        // [Domain -> Range] — check if Range looks like integers or not
+        typeExpr.contains("->") -> {
+            val rangePart = typeExpr.substringAfter("->").trim().trimEnd(']')
+            if (rangePart.contains("..") || rangePart == "Nat" || rangePart.matches(Regex("""\d+"""))) {
+                VariableType.FUNCTION_INT_TO_INT
+            } else {
+                // Range is a named set — could be enum/string values
+                VariableType.FUNCTION_INT_TO_STRING
+            }
+        }
         typeExpr.startsWith("SUBSET") -> VariableType.SET_OF_INT
         typeExpr.startsWith("{") && typeExpr.contains("\"") -> VariableType.ENUM
         typeExpr.matches(Regex(""".*\d+\.\.\w+.*""")) -> VariableType.INTEGER
+        typeExpr.matches(Regex(""".*\d+\.\.\(.*\)""")) -> VariableType.INTEGER  // 1..(MaxPending + 1)
         typeExpr.matches(Regex("""\w+""")) -> VariableType.INTEGER // bare set name
         else -> VariableType.CUSTOM
     }
@@ -317,7 +387,10 @@ class TlaParser {
 
             // Skip if this looks like a comparison rather than assignment
             // (Init should only have = not == or >= etc., but TLA+ uses = for both)
-            if (expr.startsWith("=") || expr.startsWith(">") || expr.startsWith("<")) continue
+            // Be careful not to skip <<>> (empty sequence) or <<a, b>> (tuples)
+            if (expr.startsWith("=") || expr.startsWith(">=") || expr.startsWith("<=") ||
+                (expr.startsWith("<") && !expr.startsWith("<<")) ||
+                (expr.startsWith(">") && !expr.startsWith(">>"))) continue
 
             assignments.add(InitAssignment(
                 variable = varName,
@@ -338,9 +411,10 @@ class TlaParser {
      *
      * Strategy:
      *   1. Find the `Next ==` definition block
-     *   2. Extract action names from `\E bindings : ActionName(...)` patterns
-     *   3. Extract bare action names from `\/ ActionName` patterns
-     *   4. For each action, find its definition and parse it
+     *   2. Handle `\E a \in Set :` wrapping multiple `\/ Action(a)` disjuncts
+     *   3. Extract action names from `\E bindings : ActionName(...)` patterns
+     *   4. Extract bare action names from `\/ ActionName` patterns
+     *   5. For each action, find its definition and parse it
      */
     private fun extractActions(
         content: String,
@@ -355,24 +429,55 @@ class TlaParser {
         // Map: actionName → Map(paramName → domainName) from \E quantifiers
         val actionRefs = mutableListOf<ActionRef>()
 
+        // ── NEW: Handle \E a \in Set : \/ Action1(a) \/ Action2(a) ... ──
+        // This is the common pattern in ActorLifecycle.tla where one quantifier wraps
+        // multiple disjuncts. We detect this when \E ... : is followed by \/ lines.
+        val wrappingQuantifierPattern = Regex(
+            """\\E\s+((?:\w+\s+\\in\s+[\w.]+(?:\s*,\s*)?)+)\s*:\s*\n((?:\s*\\/\s+.+\n?)+)""",
+            RegexOption.MULTILINE
+        )
+        for (wrapMatch in wrappingQuantifierPattern.findAll(nextBlock)) {
+            val bindingsStr = wrapMatch.groupValues[1]
+            val disjunctsBlock = wrapMatch.groupValues[2]
+
+            val bindings = mutableMapOf<String, String>()
+            val bindingPattern = Regex("""(\w+)\s+\\in\s+([\w.]+)""")
+            for (b in bindingPattern.findAll(bindingsStr)) {
+                bindings[b.groupValues[1]] = b.groupValues[2]
+            }
+
+            // Extract action names from each \/ line inside the quantifier
+            val innerActionPattern = Regex("""\\/\s+(\w+)(?:\(([^)]*)\))?""")
+            for (innerMatch in innerActionPattern.findAll(disjunctsBlock)) {
+                val actionName = innerMatch.groupValues[1]
+                if (actionRefs.none { it.name == actionName }) {
+                    actionRefs.add(ActionRef(actionName, bindings))
+                }
+            }
+        }
+
         // Pattern: \E var1 \in Domain1, var2 \in Domain2 : ActionName(...)
+        // (single action per quantifier — the original pattern)
         val quantifiedPattern = Regex(
-            """\\E\s+((?:\w+\s+\\in\s+\w+(?:\s*,\s*)?)+)\s*:\s*(\w+)"""
+            """\\E\s+((?:\w+\s+\\in\s+[\w.]+(?:\s*,\s*)?)+)\s*:\s*(\w+)"""
         )
         for (match in quantifiedPattern.findAll(nextBlock)) {
             val bindingsStr = match.groupValues[1]
             val actionName = match.groupValues[2]
 
+            // Skip if already found via wrapping quantifier
+            if (actionRefs.any { it.name == actionName }) continue
+
             val bindings = mutableMapOf<String, String>()
-            val bindingPattern = Regex("""(\w+)\s+\\in\s+(\w+)""")
+            val bindingPattern = Regex("""(\w+)\s+\\in\s+([\w.]+)""")
             for (b in bindingPattern.findAll(bindingsStr)) {
                 bindings[b.groupValues[1]] = b.groupValues[2]
             }
             actionRefs.add(ActionRef(actionName, bindings))
         }
 
-        // Pattern: \/ ActionName (bare, no quantifier)
-        val barePattern = Regex("""\\/\s+(\w+)\s*$""", RegexOption.MULTILINE)
+        // Pattern: \/ ActionName or \/ ActionName(...) (bare, no quantifier)
+        val barePattern = Regex("""\\/\s+(\w+)(?:\(([^)]*)\))?\s*$""", RegexOption.MULTILINE)
         for (match in barePattern.findAll(nextBlock)) {
             val actionName = match.groupValues[1]
             if (actionRefs.none { it.name == actionName }) {
@@ -418,13 +523,29 @@ class TlaParser {
                 type = VariableType.INTEGER,
                 domain = bindings[p] ?: ""
             )
+        }.toMutableList()
+
+        // Detect inner existential quantifiers (e.g., `\E msg \in 1..MaxMessages :`)
+        // These represent nondeterministic choice and become additional parameters
+        val innerExistentialPattern = Regex("""\\E\s+(\w+)\s+\\in\s+([\w.]+(?:\.\.\w+)?)\s*:""")
+        for (match in innerExistentialPattern.findAll(block)) {
+            val varName = match.groupValues[1]
+            val domain = match.groupValues[2]
+            // Don't duplicate if already a parameter
+            if (parameters.none { it.name == varName }) {
+                parameters.add(ActionParameter(
+                    name = varName,
+                    type = VariableType.INTEGER,
+                    domain = domain
+                ))
+            }
         }
 
         // System actions are internal actions not intended for user-facing operations.
-        // By default, all actions from the Next relation are user-facing.
-        // Only mark as system if the action name follows known internal patterns.
-        val systemPatterns = setOf("Crash", "Recover", "Tick", "Timeout", "Reset", "GarbageCollect")
-        val isSystem = systemPatterns.any { name.contains(it, ignoreCase = true) }
+        // Only mark as system if the action name matches EXACT known internal patterns.
+        // Note: "Timeout" alone is NOT a system action (it models user-visible request timeout).
+        val systemPatterns = setOf("Crash", "Recover", "Tick", "GarbageCollect", "ThreadReset")
+        val isSystem = systemPatterns.any { name.equals(it, ignoreCase = true) }
 
         val branches = parseBranches(block)
         val returnValues = branches.map { it.returnValue }.distinct()
@@ -492,17 +613,38 @@ class TlaParser {
      *   `var' = var - N`                        → Decrement(N)
      *   `var' = expr`                           → Assign(expr)
      *   `var' = [var EXCEPT ![k] = v]`          → FunctionUpdate(k, v)
+     *   `var' = [var EXCEPT ![k] = @ + N]`      → FunctionUpdate(k, "@ + N")
+     *   `var' = [var EXCEPT ![k] = @ \cup {e}]` → FunctionUpdate with SetAdd
+     *   `var' = [var EXCEPT ![k] = @ \ {e}]`    → FunctionUpdate with SetRemove
      *   `var' = var \cup {elem}`                → SetAdd(elem)
      *   `var' = var \ {elem}`                   → SetRemove(elem)
      *   `var' = Append(var, elem)`              → SeqAppend(elem)
+     *   `var' = Tail(var)`                      → Assign with Kotlin translation
      *   `UNCHANGED var` / `UNCHANGED <<v1,v2>>` → Unchanged
      */
     internal fun parseEffects(block: String): List<StateEffect> {
         val effects = mutableListOf<StateEffect>()
 
+        // Extract LET bindings and emit as local val declarations
+        val letBindings = extractLetBindings(block)
+        for ((name, expr) in letBindings) {
+            val kotlinExpr = translateLetBinding(name, expr)
+            effects.add(StateEffect(
+                variable = name,
+                effect = EffectExpr.Custom(
+                    tlaExpr = "LET $name == $expr",
+                    kotlinExpr = kotlinExpr
+                ),
+                tlaExpression = "LET $name == $expr"
+            ))
+        }
+
+        // Flatten multi-line LET/IN into single-line for processing
+        val normalizedBlock = normalizeLETIN(block)
+
         // Primed variable assignments: var' = expr
         val primePattern = Regex("""(\w+)'\s*=\s*(.+)""")
-        for (line in block.lines()) {
+        for (line in normalizedBlock.lines()) {
             val cleaned = line.trim().removePrefix("/\\").trim()
             val match = primePattern.find(cleaned) ?: continue
             val varName = match.groupValues[1]
@@ -519,7 +661,7 @@ class TlaParser {
         val unchangedSingle = Regex("""UNCHANGED\s+(\w+)""")
         val unchangedTuple = Regex("""UNCHANGED\s*<<([^>]+)>>""")
 
-        for (line in block.lines()) {
+        for (line in normalizedBlock.lines()) {
             val cleaned = line.trim().removePrefix("/\\").trim()
 
             unchangedTuple.find(cleaned)?.let { match ->
@@ -537,7 +679,120 @@ class TlaParser {
     }
 
     /**
+     * Translates a TLA+ LET binding expression to a Kotlin val declaration.
+     * Examples:
+     *   `rid == nextRequestId[c]` → `val rid = nextRequestId[c]!!`
+     *   `req == Head(serverQueue)` → `val req = serverQueue.first()`
+     *   `client == req[1]` → `val client = req[1]`  (tuple indexed access)
+     *   `rid == req[2]` → `val rid = req[2]`
+     */
+    private fun translateLetBinding(name: String, expr: String): String {
+        var kotlinExpr = expr
+        // Head(x) → x.first()
+        kotlinExpr = kotlinExpr.replace(Regex("""Head\((\w+)\)""")) { "${it.groupValues[1]}.first()" }
+        // Tail(x) → x.drop(1).toMutableList()
+        kotlinExpr = kotlinExpr.replace(Regex("""Tail\((\w+)\)""")) { "${it.groupValues[1]}.drop(1).toMutableList()" }
+        // Len(x) → x.size
+        kotlinExpr = kotlinExpr.replace(Regex("""Len\((\w+)\)""")) { "${it.groupValues[1]}.size" }
+        // Map access: f[k] → f[k]!! (but not array index)
+        // Only add !! for map access patterns (word[word]), not tuple index (word[digit])
+        kotlinExpr = kotlinExpr.replace(Regex("""(\w+)\[(\w+)]""")) { m ->
+            val mapName = m.groupValues[1]
+            val key = m.groupValues[2]
+            if (key.matches(Regex("""\d+"""))) {
+                // Tuple/list index — cast from Any to List, then index (TLA+ 1-based → 0-based)
+                "($mapName as List<*>)[${key.toInt() - 1}] as Int"
+            } else {
+                "${mapName}[$key]!!"
+            }
+        }
+        return "val $name = $kotlinExpr"
+    }
+
+    /**
+     * Normalizes LET/IN blocks by extracting bindings and preserving content.
+     *
+     * For patterns like:
+     *   LET rid == nextRequestId[c]
+     *   IN /\ pendingRequests' = [pendingRequests EXCEPT ![c] = @ \cup {rid}]
+     *
+     * Returns a pair of:
+     *   1. The list of LET bindings as `name == expression` pairs
+     *   2. The normalized block with LET/IN keywords removed
+     */
+    private fun extractLetBindings(block: String): List<Pair<String, String>> {
+        val bindings = mutableListOf<Pair<String, String>>()
+        val letPattern = Regex("""(?:LET\s+)?(\w+)\s*==\s*(.+)""")
+
+        var inLetBlock = false
+        for (line in block.lines()) {
+            val trimmed = line.trim().removePrefix("/\\").trim()
+            if (trimmed.startsWith("LET ")) {
+                inLetBlock = true
+                val afterLet = trimmed.removePrefix("LET").trim()
+                letPattern.find(afterLet)?.let {
+                    bindings.add(it.groupValues[1] to it.groupValues[2].trim())
+                }
+                continue
+            }
+            if (inLetBlock && !trimmed.startsWith("IN")) {
+                // Additional LET bindings (multi-line LET)
+                letPattern.find(trimmed)?.let {
+                    bindings.add(it.groupValues[1] to it.groupValues[2].trim())
+                }
+                continue
+            }
+            if (trimmed == "IN" || trimmed.startsWith("IN ")) {
+                inLetBlock = false
+                continue
+            }
+        }
+
+        return bindings
+    }
+
+    private fun normalizeLETIN(block: String): String {
+        // Remove LET and IN keywords, keep content
+        val lines = block.lines().toMutableList()
+        val result = mutableListOf<String>()
+        var i = 0
+        var inLetBlock = false
+        while (i < lines.size) {
+            val trimmed = lines[i].trim().removePrefix("/\\").trim()
+            if (trimmed.startsWith("LET ")) {
+                inLetBlock = true
+                i++
+                continue
+            }
+            if (inLetBlock && !trimmed.startsWith("IN") && !trimmed.contains("'")) {
+                // Skip LET binding lines
+                i++
+                continue
+            }
+            if (trimmed == "IN" || trimmed.startsWith("IN ")) {
+                inLetBlock = false
+                if (trimmed.length > 2) {
+                    // "IN /\ something" — keep the content after IN
+                    result.add(trimmed.removePrefix("IN").trim())
+                }
+                i++
+                continue
+            }
+            result.add(lines[i])
+            i++
+        }
+        return result.joinToString("\n")
+    }
+
+    /**
      * Classifies a primed assignment `var' = expr` into the appropriate [EffectExpr].
+     *
+     * Handles:
+     *   - Simple arithmetic: `var + N`, `var - N`
+     *   - EXCEPT patterns: `[var EXCEPT ![k] = v]`, `![k] = @ + 1`, `@ \cup {e}`, `@ \ {e}`
+     *   - Set operations: `var \cup {e}`, `var \ {e}`
+     *   - Sequence operations: `Append(var, e)`, `Tail(var)`, `Head(var)`
+     *   - Direct assignment: anything else
      */
     internal fun classifyEffect(varName: String, expr: String): EffectExpr = when {
         // var' = var + N
@@ -550,32 +805,89 @@ class TlaParser {
             val n = Regex("""-\s*(\d+)""").find(expr)!!.groupValues[1].toInt()
             EffectExpr.Decrement(n)
         }
-        // var' = [var EXCEPT ![key] = value]
-        expr.contains("EXCEPT") -> {
-            val exceptMatch = Regex("""\[.*EXCEPT\s*!\[(.+?)]\s*=\s*(.+?)]""").find(expr)
-            if (exceptMatch != null) {
-                EffectExpr.FunctionUpdate(exceptMatch.groupValues[1].trim(), exceptMatch.groupValues[2].trim())
-            } else {
-                EffectExpr.Custom(expr)
-            }
-        }
-        // var' = var \cup {elem}
+        // var' = [var EXCEPT ![key] = value] — function/map update
+        expr.contains("EXCEPT") -> parseExceptExpr(varName, expr)
+        // var' = var \cup {elem} — set add
         expr.contains("\\cup") || expr.contains("\\union") -> {
             val elem = Regex("""\{(.+?)}""").find(expr)?.groupValues?.get(1)?.trim() ?: "?"
             EffectExpr.SetAdd(elem)
         }
-        // var' = var \ {elem}
-        expr.contains("\\") && expr.contains("{") && !expr.contains("\\cup") -> {
+        // var' = var \ {elem} — set remove (but not \cup)
+        expr.contains("\\") && expr.contains("{") && !expr.contains("\\cup") && !expr.contains("\\union") -> {
             val elem = Regex("""\{(.+?)}""").find(expr)?.groupValues?.get(1)?.trim() ?: "?"
             EffectExpr.SetRemove(elem)
         }
-        // var' = Append(var, elem)
+        // var' = Append(var, elem) — sequence append
         expr.startsWith("Append(") -> {
-            val parts = expr.removePrefix("Append(").removeSuffix(")").split(",", limit = 2)
-            EffectExpr.SeqAppend(parts.getOrElse(1) { "?" }.trim())
+            val inner = expr.removePrefix("Append(").removeSuffix(")")
+            // Handle nested tuples like <<c, rid>> by finding the comma after the first arg
+            val firstComma = findTopLevelComma(inner)
+            val elem = if (firstComma >= 0) inner.substring(firstComma + 1).trim() else "?"
+            // Translate TLA+ tuple <<a, b>> to Kotlin listOf(a, b)
+            val kotlinElem = translateTupleExpr(elem)
+            EffectExpr.SeqAppend(kotlinElem)
         }
-        // Default: direct assignment
-        else -> EffectExpr.Assign(expr)
+        // var' = Tail(var) — remove head from sequence
+        expr.matches(Regex("""Tail\(\s*$varName\s*\)""")) -> {
+            EffectExpr.Custom("Tail($varName)", "${varName}.removeFirst()")
+        }
+        // var' = Head(var) — get head of sequence (as assignment)
+        expr.matches(Regex("""Head\(\s*\w+\s*\)""")) -> {
+            val seqName = Regex("""Head\(\s*(\w+)\s*\)""").find(expr)!!.groupValues[1]
+            EffectExpr.Custom("Head($seqName)", "${seqName}.first()")
+        }
+        // Default: direct assignment with TLA→Kotlin translation
+        else -> EffectExpr.Assign(tlaExprToKotlin(expr))
+    }
+
+    /**
+     * Parses EXCEPT expressions into the appropriate [EffectExpr].
+     *
+     * Handles patterns:
+     *   `[var EXCEPT ![k] = v]`           → FunctionUpdate(k, v)
+     *   `[var EXCEPT ![k] = @ + 1]`       → FunctionUpdate(k, "@+1") → generator translates @
+     *   `[var EXCEPT ![k] = @ \cup {e}]`  → FunctionUpdate with set-add semantics
+     *   `[var EXCEPT ![k] = @ \ {e}]`     → FunctionUpdate with set-remove semantics
+     */
+    private fun parseExceptExpr(varName: String, expr: String): EffectExpr {
+        val exceptMatch = Regex("""\[.*EXCEPT\s*!\[(.+?)]\s*=\s*(.+?)\s*]""").find(expr)
+        if (exceptMatch != null) {
+            val key = exceptMatch.groupValues[1].trim()
+            val value = exceptMatch.groupValues[2].trim()
+
+            // Translate @ (current value) patterns to Kotlin
+            val kotlinValue = when {
+                value.matches(Regex("""@\s*\+\s*\d+""")) -> {
+                    val n = Regex("""\+\s*(\d+)""").find(value)!!.groupValues[1]
+                    "$varName[$key] + $n"
+                }
+                value.matches(Regex("""@\s*-\s*\d+""")) -> {
+                    val n = Regex("""-\s*(\d+)""").find(value)!!.groupValues[1]
+                    "$varName[$key] - $n"
+                }
+                value.contains("@") && (value.contains("\\cup") || value.contains("\\union")) -> {
+                    val elem = Regex("""\{(.+?)}""").find(value)?.groupValues?.get(1)?.trim() ?: "?"
+                    // In-place set mutation: map[key]!!.add(elem)
+                    return EffectExpr.Custom(
+                        "$varName EXCEPT ![$key] = $value",
+                        "$varName[$key]!!.add($elem)"
+                    )
+                }
+                value.contains("@") && value.contains("\\") && value.contains("{") -> {
+                    val elem = Regex("""\{(.+?)}""").find(value)?.groupValues?.get(1)?.trim() ?: "?"
+                    // In-place set mutation: map[key]!!.remove(elem)
+                    return EffectExpr.Custom(
+                        "$varName EXCEPT ![$key] = $value",
+                        "$varName[$key]!!.remove($elem)"
+                    )
+                }
+                value == "@" -> "$varName[$key]" // identity
+                else -> value
+            }
+
+            return EffectExpr.FunctionUpdate(key, kotlinValue)
+        }
+        return EffectExpr.Custom(expr)
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -584,11 +896,16 @@ class TlaParser {
 
     private fun extractPrecondition(block: String): PredicateExpr {
         val conditions = mutableListOf<PredicateExpr>()
+        val normalizedBlock = normalizeLETIN(block)
 
-        for (line in block.lines()) {
-            val cleaned = line.trim().removePrefix("/\\").trim()
+        for (line in normalizedBlock.lines()) {
+            var cleaned = line.trim().removePrefix("/\\").trim()
+            if (cleaned.isEmpty()) continue
+            // Strip TLA+ inline comments: \* comment text
+            cleaned = cleaned.replace(Regex("""\s*\\\*.*$"""), "").trim()
             if (cleaned.isEmpty()) continue
             if (cleaned.contains("'") || cleaned.startsWith("UNCHANGED")) continue // effects, not guards
+            if (cleaned.startsWith("\\E ")) continue // existential quantifiers inside actions are part of effects
 
             val pred = parseSinglePredicate(cleaned) ?: continue
             conditions.add(pred)
@@ -608,49 +925,144 @@ class TlaParser {
 
     /**
      * Parses a single predicate line into a [PredicateExpr].
+     *
+     * Handles:
+     *   - Membership: `x \in S`, `x \notin S`
+     *   - Comparisons: `a > b`, `a >= b`, `a = b`, `a # b`, etc.
+     *   - Universal quantifiers: `\A x \in S : P`
+     *   - Existential quantifiers: `\E x \in S : P`
+     *   - Negation: `~P`, `\lnot P`
+     *   - Implications: `P => Q`
+     *   - Conjunctions within a line: `P /\ Q`
+     *   - Disjunctions within a line: `P \/ Q`
+     *   - Function application: `f[k]` in comparisons
+     *   - Len/Cardinality in comparisons
+     *   - Set intersection emptiness: `A \cap B = {}`
+     *   - Subset: `A \subseteq B`
      */
     internal fun parseSinglePredicate(text: String): PredicateExpr? {
         val trimmed = text.trim()
+        if (trimmed.isEmpty()) return null
 
-        // var \in Set
-        Regex("""(\w+(?:\[[\w,\s]+])?)\s*\\in\s+(.+)""").find(trimmed)?.let {
-            return PredicateExpr.Membership(it.groupValues[1].trim(), it.groupValues[2].trim())
+        // ── Multi-variable universal quantifier: \A x \in S, y \in T : body ──
+        // Must come BEFORE implication check, because the quantifier body may contain =>
+        Regex("""\\A\s+(\w+)\s+\\in\s+([\w.]+(?:\([^)]*\))?)\s*,\s*(\w+)\s+\\in\s+([\w.]+(?:\([^)]*\))?)\s*:\s*(.+)""").find(trimmed)?.let {
+            val body = parseSinglePredicate(it.groupValues[5].trim())
+                ?: PredicateExpr.Custom(it.groupValues[5].trim())
+            // Nest as ForAll(x, S, ForAll(y, T, body))
+            val inner = PredicateExpr.ForAll(it.groupValues[3], it.groupValues[4], body)
+            return PredicateExpr.ForAll(it.groupValues[1], it.groupValues[2], inner)
         }
 
-        // var \notin Set
-        Regex("""(\w+(?:\[[\w,\s]+])?)\s*\\notin\s+(.+)""").find(trimmed)?.let {
+        // ── Universal quantifier: \A x \in S : body ──
+        Regex("""\\A\s+(\w+)\s+\\in\s+([\w.]+(?:\([^)]*\))?)\s*:\s*(.+)""").find(trimmed)?.let {
+            val body = parseSinglePredicate(it.groupValues[3].trim())
+                ?: PredicateExpr.Custom(it.groupValues[3].trim())
+            return PredicateExpr.ForAll(it.groupValues[1], it.groupValues[2], body)
+        }
+
+        // ── Existential quantifier: \E x \in S : body ──
+        Regex("""\\E\s+(\w+)\s+\\in\s+([\w.]+(?:\([^)]*\))?)\s*:\s*(.+)""").find(trimmed)?.let {
+            val body = parseSinglePredicate(it.groupValues[3].trim())
+                ?: PredicateExpr.Custom(it.groupValues[3].trim())
+            return PredicateExpr.Exists(it.groupValues[1], it.groupValues[2], body)
+        }
+
+        // ── Implication: P => Q ──
+        if (trimmed.contains("=>")) {
+            val parts = trimmed.split("=>", limit = 2)
+            if (parts.size == 2) {
+                val antecedent = parseSinglePredicate(parts[0].trim())
+                val consequent = parseSinglePredicate(parts[1].trim())
+                if (antecedent != null && consequent != null) {
+                    // P => Q  ≡  ¬P ∨ Q
+                    return PredicateExpr.Or(PredicateExpr.Not(antecedent), consequent)
+                }
+            }
+        }
+
+        // ── Set intersection emptiness: A \cap B = {} ──
+        Regex("""([\w\[\]]+)\s*\\cap\s+([\w\[\]]+)\s*=\s*\{}""").find(trimmed)?.let {
+            val kotlinExpr = "(${it.groupValues[1]} intersect ${it.groupValues[2]}).isEmpty()"
+            return PredicateExpr.Custom(trimmed, kotlinExpr)
+        }
+
+        // ── Cardinality comparison: Cardinality(expr) op N ──
+        Regex("""Cardinality\((.+?)\)\s*(<=|>=|<|>|=|#)\s*(.+)""").find(trimmed)?.let {
+            val setExpr = translateSetExpr(it.groupValues[1].trim())
+            val op = it.groupValues[2]
+            val right = it.groupValues[3].trim()
+            val kotlinOp = when (op) {
+                "=" -> "=="; "#" -> "!="; else -> op
+            }
+            val kotlinExpr = "$setExpr.size $kotlinOp $right"
+            return PredicateExpr.Custom(trimmed, kotlinExpr)
+        }
+
+        // ── Len comparison: Len(var) op N ──
+        Regex("""Len\((\w+)\)\s*(<=|>=|<|>|=|#)\s*(.+)""").find(trimmed)?.let {
+            val seqVar = it.groupValues[1]
+            val op = it.groupValues[2]
+            val right = it.groupValues[3].trim()
+            val kotlinOp = when (op) {
+                "=" -> "=="; "#" -> "!="; else -> op
+            }
+            return PredicateExpr.Comparison("${seqVar}.size", CompOp.entries.first { c -> c.kotlin == kotlinOp }, right)
+        }
+
+        // ── Membership: var \in Set ──
+        Regex("""([\w\[\],\s]+?)\s*\\in\s+(.+)""").find(trimmed)?.let {
+            val elem = it.groupValues[1].trim()
+            val set = it.groupValues[2].trim()
+            // Skip if this looks like a quantifier part (handled above)
+            if (!trimmed.startsWith("\\A") && !trimmed.startsWith("\\E")) {
+                return PredicateExpr.Membership(elem, set)
+            }
+        }
+
+        // ── Negated membership: var \notin Set ──
+        Regex("""([\w\[\],\s]+?)\s*\\notin\s+(.+)""").find(trimmed)?.let {
             return PredicateExpr.Membership(it.groupValues[1].trim(), it.groupValues[2].trim(), negated = true)
         }
 
-        // Comparison: left op right
-        for (op in listOf(">=", "<=", "#", "/=", "=", ">", "<")) {
-            val parts = trimmed.split(op, limit = 2)
+        // ── Subset: A \subseteq B ──
+        Regex("""([\w\[\]]+)\s*\\subseteq\s+([\w\[\]]+)""").find(trimmed)?.let {
+            val kotlinExpr = "${it.groupValues[2]}.containsAll(${it.groupValues[1]})"
+            return PredicateExpr.Custom(trimmed, kotlinExpr)
+        }
+
+        // ── Negation: ~P or \lnot P ──
+        if (trimmed.startsWith("~") || trimmed.startsWith("\\lnot")) {
+            val inner = trimmed.removePrefix("~").removePrefix("\\lnot").trim()
+                .removePrefix("(").removeSuffix(")").trim()
+            val innerPred = parseSinglePredicate(inner) ?: PredicateExpr.Custom(inner)
+            return PredicateExpr.Not(innerPred)
+        }
+
+        // ── Inequality /= ──
+        if (trimmed.contains("/=")) {
+            val parts = trimmed.split("/=", limit = 2)
             if (parts.size == 2) {
+                return PredicateExpr.Comparison(parts[0].trim(), CompOp.NEQ, parts[1].trim())
+            }
+        }
+
+        // ── Comparison: left op right ──
+        for (op in listOf(">=", "<=", "#", "=", ">", "<")) {
+            // Skip if this is inside a function application like f[k] = v
+            val parts = trimmed.split(op, limit = 2)
+            if (parts.size == 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) {
                 val compOp = when (op) {
                     ">=" -> CompOp.GE
                     "<=" -> CompOp.LE
                     ">" -> CompOp.GT
                     "<" -> CompOp.LT
                     "=" -> CompOp.EQ
-                    "#", "/=" -> CompOp.NEQ
+                    "#" -> CompOp.NEQ
                     else -> continue
                 }
                 return PredicateExpr.Comparison(parts[0].trim(), compOp, parts[1].trim())
             }
-        }
-
-        // \A var \in Domain : body
-        Regex("""\\A\s+(\w+)\s+\\in\s+(\w+)\s*:\s*(.+)""").find(trimmed)?.let {
-            val body = parseSinglePredicate(it.groupValues[3].trim()) ?: PredicateExpr.Custom(it.groupValues[3].trim())
-            return PredicateExpr.ForAll(it.groupValues[1], it.groupValues[2], body)
-        }
-
-        // ~(expr) or negation
-        if (trimmed.startsWith("~") || trimmed.startsWith("\\lnot")) {
-            val inner = trimmed.removePrefix("~").removePrefix("\\lnot").trim()
-                .removePrefix("(").removeSuffix(")").trim()
-            val innerPred = parseSinglePredicate(inner) ?: PredicateExpr.Custom(inner)
-            return PredicateExpr.Not(innerPred)
         }
 
         // If we can't parse it, return null (the caller decides whether to use Custom)
@@ -685,7 +1097,7 @@ class TlaParser {
         //   - Not Init, Next, Spec, TypeOK, Fairness, or known action names
         val excludeNames = setOf(
             "Init", "Next", "Spec", "TypeOK", "Fairness",
-            "vars", "RECURSIVE"
+            "vars", "RECURSIVE", "States"
         ) + actionNames
 
         // Find all top-level definitions (both single-line and multi-line)
@@ -699,26 +1111,135 @@ class TlaParser {
 
             // An invariant has NO primed variables and is a boolean expression
             if (block.contains("'")) continue  // has effects → not an invariant
-            if (block.contains("\\E") && block.contains(":")) continue  // likely an action sub-part
             // Skip temporal formulas (Spec-like)
             if (block.contains("[]") && block.contains("_")) continue
 
-            // Check if it looks like a predicate (contains comparisons, /\, etc.)
+            // Check if it looks like a predicate (contains comparisons, /\, quantifiers, etc.)
             if (block.contains("\\in") || block.contains(">=") || block.contains("<=") ||
                 block.contains(">") || block.contains("<") ||
                 block.contains("/\\") || block.contains("#") || block.contains("=>") ||
-                block.contains("\\A") || block.contains("\\notin")) {
+                block.contains("\\A") || block.contains("\\notin") ||
+                block.contains("Cardinality") || block.contains("\\cap") ||
+                block.contains("\\subseteq") || block.contains("/=") ||
+                block.contains("Len(")) {
 
-                val predicate = extractPrecondition(block)
+                val predicate = parseInvariantPredicate(block)
                 invariants.add(InvariantSpec(
                     name = name,
                     predicate = predicate,
+                    description = block.trim().lines().first().trim(),
                     rawTla = block.trim()
                 ))
             }
         }
 
         return invariants
+    }
+
+    /**
+     * Parses an invariant predicate block, handling multi-line expressions.
+     * Unlike extractPrecondition (for actions), this handles the full block
+     * as a single predicate, including complex constructs like:
+     *   - `\A c \in Clients : Cardinality(...) <= N`
+     *   - `\A c \in Clients : replies[c] \cap timedOut[c] = {}`
+     *   - LET/IN blocks (treated as Custom with raw TLA+ description)
+     *   - Multi-line quantified: `\A a \in Actors :\n    body`
+     */
+    private fun parseInvariantPredicate(block: String): PredicateExpr {
+        val trimmedBlock = block.trim()
+
+        // If it contains LET/IN, it's too complex for structural parsing
+        // but we can still extract a description
+        if (trimmedBlock.contains("LET") && trimmedBlock.contains("IN")) {
+            return PredicateExpr.Custom(trimmedBlock)
+        }
+
+        // First, join multi-line quantified expressions.
+        // Pattern: `\A x \in S :` on one line, body on next line(s).
+        // We need to collapse these into a single logical unit.
+        val joined = joinQuantifiedLines(trimmedBlock)
+
+        // Try to join multi-line /\ into a single expression
+        val lines = joined.lines()
+            .map { it.trim().removePrefix("/\\").trim() }
+            .filter { it.isNotEmpty() && !it.startsWith("\\*") }
+
+        if (lines.size == 1) {
+            return parseSinglePredicate(lines[0]) ?: PredicateExpr.Custom(lines[0])
+        }
+
+        // Multiple conjuncts
+        val conditions = lines.mapNotNull { parseSinglePredicate(it) }
+        return when {
+            conditions.isEmpty() -> PredicateExpr.Custom(trimmedBlock)
+            conditions.size == 1 -> conditions.first()
+            else -> conditions.reduce { acc, p -> PredicateExpr.And(acc, p) }
+        }
+    }
+
+    /**
+     * Joins multi-line quantified expressions into single lines.
+     *
+     * Handles patterns like:
+     * ```
+     * \A a \in Actors :
+     *     actorState[a] = "stopped" => a \notin alive
+     * ```
+     * becomes:
+     * ```
+     * \A a \in Actors : actorState[a] = "stopped" => a \notin alive
+     * ```
+     *
+     * Also handles multi-variable quantifiers:
+     * ```
+     * \A c \in Clients, rid \in 1..MaxPending :
+     *     Cardinality(...) <= 1
+     * ```
+     */
+    private fun joinQuantifiedLines(text: String): String {
+        val lines = text.lines()
+        val result = mutableListOf<String>()
+        var i = 0
+
+        while (i < lines.size) {
+            val line = lines[i].trim()
+
+            // Skip TLA+ comments
+            if (line.startsWith("\\*")) { i++; continue }
+
+            // Check if this line ends a quantifier (ends with ':') and the body is on next line(s)
+            val quantEndsWithColon = line.matches(Regex(""".*\\[AE]\s+\w+\s+\\in\s+.+:\s*$"""))
+
+            if (quantEndsWithColon && i + 1 < lines.size) {
+                // Collect continuation lines (indented body of the quantifier)
+                val bodyLines = mutableListOf<String>()
+                var j = i + 1
+                while (j < lines.size) {
+                    val rawLine = lines[j]
+                    val nextLine = rawLine.trim()
+                    if (nextLine.isEmpty()) { j++; break } // empty line ends the body
+                    if (nextLine.startsWith("\\*")) { j++; break } // comment ends the body
+                    // Stop if we hit a new definition or non-indented content
+                    val isIndented = rawLine.startsWith("    ") || rawLine.startsWith("\t")
+                    if (!isIndented) break
+                    if (nextLine.matches(Regex("""\w+\s*==.*"""))) break
+                    bodyLines.add(nextLine.removePrefix("/\\").trim())
+                    j++
+                }
+                if (bodyLines.isNotEmpty()) {
+                    result.add("$line ${bodyLines.joinToString(" /\\ ")}")
+                    i = j
+                } else {
+                    result.add(line)
+                    i++
+                }
+            } else {
+                result.add(line)
+                i++
+            }
+        }
+
+        return result.joinToString("\n")
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -794,13 +1315,67 @@ class TlaParser {
     //  HELPER: TLA+ → Kotlin expression translation
     // ─────────────────────────────────────────────────────────────────────
 
+    /**
+     * Translates TLA+ set expressions to Kotlin.
+     * Handles: `\cup` → `union`, `\cap` → `intersect`, 
+     * and preserves function application `f[k]`.
+     */
+    private fun translateSetExpr(expr: String): String {
+        var result = expr
+        result = result.replace(Regex("""\s*\\cup\s*"""), " union ")
+        result = result.replace(Regex("""\s*\\cap\s*"""), " intersect ")
+        // Wrap compound expressions in parentheses
+        if (result.contains(" union ") || result.contains(" intersect ")) {
+            result = "($result)"
+        }
+        return result
+    }
+
+    /**
+     * Translates a TLA+ tuple expression `<<a, b>>` to Kotlin `listOf(a, b)`.
+     * If not a tuple, returns the expression unchanged.
+     */
+    private fun translateTupleExpr(expr: String): String {
+        val trimmed = expr.trim()
+        if (trimmed.startsWith("<<") && trimmed.endsWith(">>")) {
+            val inner = trimmed.removePrefix("<<").removeSuffix(">>").trim()
+            return "listOf($inner)"
+        }
+        return trimmed
+    }
+
+    /**
+     * Finds the first top-level comma in a string, skipping nested delimiters.
+     * Returns the index or -1 if not found.
+     */
+    private fun findTopLevelComma(text: String): Int {
+        var depth = 0
+        for ((i, ch) in text.withIndex()) {
+            when (ch) {
+                '(', '<', '[', '{' -> depth++
+                ')', '>', ']', '}' -> depth--
+                ',' -> if (depth == 0) return i
+            }
+        }
+        return -1
+    }
+
     private fun tlaExprToKotlin(expr: String): String = when {
         expr == "TRUE" -> "true"
         expr == "FALSE" -> "false"
         expr == "<<>>" -> "mutableListOf()"
         expr == "{}" -> "mutableSetOf()"
         expr.matches(Regex("""\d+""")) -> expr
-        expr.startsWith("[") && expr.contains("|->") -> "mutableMapOf()" // function literal
+        // [s \in Set |-> value] — function literal for maps
+        expr.startsWith("[") && expr.contains("|->") -> {
+            val mapMatch = Regex("""\[\w+\s+\\in\s+\w+\s*\|->\s*(.+)]""").find(expr)
+            val defaultVal = mapMatch?.groupValues?.get(1)?.trim()
+            if (defaultVal == "{}" || defaultVal == "{}") {
+                "mutableMapOf()" // map of sets
+            } else {
+                "mutableMapOf()" // will be populated by test infrastructure
+            }
+        }
         else -> expr
     }
 
