@@ -46,6 +46,8 @@ import io.github.tla2lincheck.ir.*
  */
 class TlaParser {
 
+    private val sanyParser = SanyParser()
+
     // ─────────────────────────────────────────────────────────────────────
     //  PUBLIC API
     // ─────────────────────────────────────────────────────────────────────
@@ -53,11 +55,21 @@ class TlaParser {
     /**
      * Parses a TLA+ specification from its text content.
      *
+     * Delegates to [SanyParser] which uses the SANY (Syntax Analyzer by Lamport)
+     * to build a fully-typed AST, then walks it to produce a [ConcurrentSystemSpec].
+     *
      * @param tlaContent  The full text of the `.tla` file
      * @param filePath    The file path (for [SpecSource] metadata)
      * @return A [ParseResult] containing the parsed spec, warnings, and errors
      */
     fun parse(tlaContent: String, filePath: String = ""): ParseResult {
+        return sanyParser.parse(tlaContent, filePath)
+    }
+
+    /**
+     * Parses using the legacy regex-based parser (kept for comparison/fallback).
+     */
+    fun parseLegacy(tlaContent: String, filePath: String = ""): ParseResult {
         val warnings = mutableListOf<ParseWarning>()
         val errors = mutableListOf<ParseError>()
         val lines = tlaContent.lines()
